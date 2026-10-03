@@ -1,0 +1,30 @@
+data_dir: /var/lib/vector
+sources:
+  access:
+    type: file
+    include: ["/logs/*.log", "/logs/*.jsonl"]
+    read_from: beginning
+sinks:
+  defencelens:
+    type: http
+    inputs: [access]
+    uri: "http://api:8000/api/ingest/${VECTOR_SOURCE_ID}"
+    method: post
+    auth:
+      strategy: bearer
+      token: "${API_TOKEN}"
+    encoding:
+      codec: json
+    framing:
+      method: newline_delimited
+    batch:
+      max_events: 200
+      timeout_secs: 2
+    buffer:
+      type: disk
+      max_size: 268435488
+      when_full: block
+    acknowledgements:
+      enabled: true
+    healthcheck:
+      enabled: false

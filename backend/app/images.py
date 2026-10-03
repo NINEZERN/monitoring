@@ -25,17 +25,17 @@ def validate_archive(path):
             count += 1
             p = PurePosixPath(member.name)
             if count > 100000 or p.is_absolute() or ".." in p.parts or member.issym() or member.islnk():
-                raise ValueError("Небезопасная структура архива")
+                raise ValueError("Unsafe archive structure")
             names.add(member.name)
             if member.name == "manifest.json":
                 if member.size > 1024 * 1024:
-                    raise ValueError("Слишком большой manifest")
+                    raise ValueError("Manifest is too large")
                 manifest = json.load(archive.extractfile(member))
         if not isinstance(manifest, list) or not manifest:
-            raise ValueError("Требуется несжатый архив docker save с manifest.json")
+            raise ValueError("An uncompressed docker save archive with manifest.json is required")
         for item in manifest:
             if not isinstance(item, dict) or item.get("Config") not in names or not isinstance(item.get("Layers"), list) or any(layer not in names for layer in item["Layers"]):
-                raise ValueError("Неполный manifest docker save")
+                raise ValueError("Incomplete docker save manifest")
 
 @router.post("/scans")
 async def upload_image(file: UploadFile = File(...), db=Depends(session)):
@@ -50,13 +50,13 @@ async def upload_image(file: UploadFile = File(...), db=Depends(session)):
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
                 if size > settings.max_image_bytes:
-                    raise HTTPException(413, "Максимальный размер образа: 512 MiB")
+                    raise HTTPException(413, "Maximum image size: 512 MiB")
                 out.write(chunk)
                 digest.update(chunk)
         try:
             validate_archive(path)
         except (tarfile.TarError, ValueError, KeyError, TypeError, OSError):
-            raise HTTPException(422, "Некорректный или небезопасный архив docker save")
+            raise HTTPException(422, "Invalid or unsafe docker save archive")
         obj = Scan(id=id, filename=(file.filename or "image.tar")[:200], digest=digest.hexdigest())
         db.add(obj)
         db.commit()
@@ -83,7 +83,7 @@ def scan(id: str, db=Depends(session)):
 def retry(id: str, db=Depends(session)):
     obj = require(db, Scan, id)
     if obj.status != "failed":
-        raise HTTPException(409, "Повтор доступен для завершившегося ошибкой сканирования")
+        raise HTTPException(409, "Retry is available only for a failed scan")
     obj.status, obj.error, obj.updated_at = "pending", None, now()
     db.commit()
     return row(obj)
@@ -99,11 +99,11 @@ class DeploymentInput(BaseModel):
     @model_validator(mode="after")
     def check(self):
         if self.started_at.tzinfo is None or (self.ended_at and self.ended_at.tzinfo is None):
-            raise ValueError("Укажите часовой пояс")
+            raise ValueError("Specify a timezone")
         if self.ended_at and self.ended_at <= self.started_at:
-            raise ValueError("Конец периода должен быть позже начала")
+            raise ValueError("Period end must be after the start")
         if self.confirmation == "operator_confirmed" and not self.evidence.strip():
-            raise ValueError("Подтверждение требует обоснования: digest или ссылка на deployment")
+            raise ValueError("Confirmation requires evidence: a digest or deployment link")
         return self
 
 @router.get("/deployments")

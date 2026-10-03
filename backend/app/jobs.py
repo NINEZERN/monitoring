@@ -33,7 +33,7 @@ def scan_image(id):
                               "severity": dict(Counter(v["Severity"] for v in vulns))},
                   "vulnerabilities": vulns, "components": packages, "secrets": secrets,
                   "metadata": {"image_id": report.get("Metadata", {}).get("ImageID"), "repo_tags": report.get("Metadata", {}).get("RepoTags", [])},
-                  "limitations": ["CVE означает известную уязвимость компонента, а не доказанный взлом.", "Результат зависит от покрытия и актуальности базы Trivy.", "Потенциальные секреты требуют ручной проверки. Значения скрыты.", "Архив образа не содержит текущие runtime-логи автоматически."]}
+                  "limitations": ["A CVE means a known component vulnerability, not proven compromise.", "Results depend on Trivy database coverage and freshness.", "Potential secrets require manual review. Values are hidden.", "An image archive does not automatically include current runtime logs."]}
         with Session() as db:
             scan = db.get(Scan, id)
             scan.status, scan.result, scan.error, scan.updated_at = "completed", result, None, now()
@@ -42,6 +42,6 @@ def scan_image(id):
         # Do not expose scanner stderr: it may contain untrusted archive content or secrets.
         with Session() as db:
             scan = db.get(Scan, id)
-            scan.status, scan.error, scan.updated_at = "retrying", f"Trivy: {type(exc).__name__}. Проверьте доступ к базе уязвимостей, ресурсы worker и корректность образа.", now()
+            scan.status, scan.error, scan.updated_at = "retrying", f"Trivy: {type(exc).__name__}. Check vulnerability database access, worker resources, and image validity.", now()
             db.commit()
         raise RuntimeError("Trivy scan failed; see persisted diagnostic") from None

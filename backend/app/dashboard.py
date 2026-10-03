@@ -22,7 +22,7 @@ def dashboard(db=Depends(session)):
             severity = scan.result["summary"]["severity"]
             points = min(15, severity.get("CRITICAL", 0) * 5 + severity.get("HIGH", 0) * 2)
             if points:
-                contributions.append({"label": f"Уязвимости подтверждённого deployment: {scan.filename}", "points": points, "type": "exposure"})
+                contributions.append({"label": f"Vulnerabilities in confirmed deployment: {scan.filename}", "points": points, "type": "exposure"})
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     events = list(db.scalars(select(Event).where(Event.timestamp >= cutoff.isoformat())))
     buckets = {}
@@ -35,8 +35,8 @@ def dashboard(db=Depends(session)):
             buckets[stamp]["events"] += 1
             buckets[stamp]["errors"] += int(e.data.get("status", 0) >= 500)
     return {"risk": min(100, sum(c["points"] for c in contributions)), "contributions": contributions,
-            "risk_explanation": "Сумма: P1=25, P2=12, P3=5 × важность сервиса/5; активный подтверждённый образ: Critical×5 + High×2, до 15 на образ. Общий предел 100. Это приоритет внимания, не вероятность взлома.",
-            "limitations": "Неподтверждённые связи образов не увеличивают индекс. Нет логов — нет оценки покрытия, а не гарантия безопасности. CVE не доказывают эксплуатацию.",
+            "risk_explanation": "Sum: P1=25, P2=12, P3=5 × service importance/5; active confirmed image: Critical×5 + High×2, up to 15 per image. Overall cap is 100. This is an attention priority, not a probability of compromise.",
+            "limitations": "Unconfirmed image links do not increase the score. No logs means no coverage assessment, not a security guarantee. CVEs do not prove exploitation.",
             "events_total": db.scalar(select(func.count()).select_from(Event)), "events_hour": len(events),
             "errors_hour": sum(e.data.get("status", 0) >= 500 for e in events), "active_incidents": len(active),
             "services": len(services), "scans_completed": sum(s.status == "completed" for s in scans),
@@ -47,14 +47,14 @@ def demo(db=Depends(session)):
     # Explicitly requested demo only; never inserted on application startup.
     existing = db.get(Source, "demo-api")
     if existing:
-        return {"detail": "Демо уже загружено. Повтор не создаёт копий.", "source_id": existing.id}
-    db.add(Service(id="demo-db", name="volunteer-db", description="База заявок и контактных данных", importance=5, dependencies=[]))
+        return {"detail": "Demo is already loaded. Re-running it does not create duplicates.", "source_id": existing.id}
+    db.add(Service(id="demo-db", name="volunteer-db", description="Request and contact database", importance=5, dependencies=[]))
     db.flush()
-    db.add(Service(id="demo-api-service", name="volunteer-api", description="Принимает заявки на помощь. Недоступность мешает людям отправлять заявки.", importance=5, dependencies=["demo-db"]))
+    db.add(Service(id="demo-api-service", name="volunteer-api", description="Receives requests for help. Outage prevents people from submitting requests.", importance=5, dependencies=["demo-db"]))
     db.flush()
-    db.add(Service(id="demo-gateway", name="volunteer-gateway", description="Входная точка волонтёрского центра", importance=4, dependencies=["demo-api-service"]))
+    db.add(Service(id="demo-gateway", name="volunteer-gateway", description="Volunteer center entry point", importance=4, dependencies=["demo-api-service"]))
     db.flush()
-    db.add(Source(id="demo-api", name="Демонстрация · синтетические логи", service_id="demo-api-service", kind="upload"))
+    db.add(Source(id="demo-api", name="Demo · synthetic logs", service_id="demo-api-service", kind="upload"))
     db.add(Source(id="vector-demo", name="Vector · file tail", service_id="demo-api-service", kind="http"))
     db.flush()
     base = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(minutes=12)
@@ -67,4 +67,4 @@ def demo(db=Depends(session)):
     logs.append({"event_id": "demo-probe", "timestamp": (base + timedelta(minutes=8, seconds=5)).isoformat(), "status": 403, "path": "/.env", "ip": "203.0.113.24", "synthetic": True})
     for n in range(20):
         logs.append({"event_id": f"demo-errors-{n}", "timestamp": (base + timedelta(minutes=9, seconds=n*6)).isoformat(), "status": 503 if n < 14 else 200, "method": "POST", "path": "/requests", "synthetic": True})
-    return dict(ingest(db, "demo-api", logs), source_id="demo-api", detail="Синтетические данные загружены. Сканирования образов не подделываются.")
+    return dict(ingest(db, "demo-api", logs), source_id="demo-api", detail="Synthetic data loaded. Image scans are not faked.")

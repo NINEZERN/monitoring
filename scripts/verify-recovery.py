@@ -8,5 +8,5 @@ logs=[{"event_id":"recovery-"+uuid.uuid4().hex,"timestamp":datetime.now(timezone
 call("/ingest/demo-api",logs)
 result=call(url+"/verify",{})
 assert result["result"]=="observed_improvement",result
-call(url+"/actions",{"status":"open","note":"Демонстрационный инцидент оставлен открытым для просмотра. Проверка восстановления выполнена на явно синтетических событиях."})
+call(url+"/actions",{"status":"open","note":"Demo incident left open for review. Recovery verification was performed on explicitly synthetic events."})
 print("PASS: verification observes 12 healthy responses after operator action; does not auto-resolve incident")

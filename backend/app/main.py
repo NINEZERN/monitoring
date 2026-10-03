@@ -21,7 +21,7 @@ app = FastAPI(title="DefenceLens", version="0.1.0")
 
 def auth(request: Request):
     if not hmac.compare_digest(request.headers.get("authorization", ""), "Bearer " + settings.api_token):
-        raise HTTPException(401, "Требуется API-токен")
+        raise HTTPException(401, "API token is required")
 
 def row(obj):
     return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
@@ -29,12 +29,12 @@ def row(obj):
 def require(db, model, id):
     obj = db.get(model, id)
     if obj is None:
-        raise HTTPException(404, "Запись не найдена")
+        raise HTTPException(404, "Record not found")
     return obj
 
 @app.exception_handler(SQLAlchemyError)
 async def database_error(request, exc):
-    return JSONResponse(status_code=503, content={"detail": "База данных недоступна или операция конфликтует. Повторите запрос."})
+    return JSONResponse(status_code=503, content={"detail": "Database is unavailable or the operation conflicts. Retry the request."})
 
 @app.get("/api/health")
 def health(db=Depends(session)):
@@ -64,14 +64,14 @@ class ServiceInput(BaseModel):
 def validate_service(db, data, id=None):
     duplicate = db.scalar(select(Service).where(Service.name == data.name))
     if duplicate and duplicate.id != id:
-        raise HTTPException(409, "Имя сервиса уже используется")
+        raise HTTPException(409, "Service name is already in use")
     services = {x.id: x.dependencies for x in db.scalars(select(Service))}
     if any(dep not in services or dep == id for dep in data.dependencies):
-        raise HTTPException(422, "Зависимость должна ссылаться на другой существующий сервис")
+        raise HTTPException(422, "Dependency must reference another existing service")
     services[id or "new"] = data.dependencies
     def walk(key, path):
         if key in path:
-            raise HTTPException(422, "Циклические зависимости не допускаются")
+            raise HTTPException(422, "Cyclic dependencies are not allowed")
         for dep in services.get(key, []):
             walk(dep, path | {key})
     for key in services:
@@ -127,7 +127,7 @@ def ingest(db, source_id, lines):
     db.refresh(source)
     accepted, duplicates, failures, timestamps = 0, 0, [], []
     if len(lines) > 2000:
-        raise HTTPException(413, "Не более 2000 событий в пакете")
+        raise HTTPException(413, "No more than 2000 events per batch")
     for number, raw in enumerate(lines, 1):
         if isinstance(raw, str) and not raw.strip():
             continue
@@ -149,7 +149,7 @@ def ingest(db, source_id, lines):
     source.duplicates += duplicates
     source.rejected += len(failures)
     source.last_received = now()
-    source.last_error = f"Отклонено строк: {len(failures)}" if failures else None
+    source.last_error = f"Rejected lines: {len(failures)}" if failures else None
     if timestamps:
         analyze(db, source.service_id, min(timestamps), max(timestamps))
     db.commit()
@@ -160,7 +160,7 @@ async def bounded_body(request, limit):
     async for chunk in request.stream():
         body.extend(chunk)
         if len(body) > limit:
-            raise HTTPException(413, "Превышен размер пакета")
+            raise HTTPException(413, "Batch size exceeded")
     return bytes(body)
 
 @app.post("/api/ingest/{source_id}", dependencies=[Depends(auth)])
@@ -174,18 +174,18 @@ async def http_ingest(source_id: str, request: Request, db=Depends(session)):
         except json.JSONDecodeError:
             lines = content.splitlines()
     except UnicodeDecodeError:
-        raise HTTPException(422, "Ожидается UTF-8")
+        raise HTTPException(422, "UTF-8 is expected")
     return ingest(db, source_id, lines)
 
 @app.post("/api/sources/{source_id}/upload", dependencies=[Depends(auth)])
 async def upload_logs(source_id: str, file: UploadFile = File(...), db=Depends(session)):
     body = await file.read(settings.max_log_bytes + 1)
     if len(body) > settings.max_log_bytes:
-        raise HTTPException(413, "Максимальный размер логов: 5 MiB")
+        raise HTTPException(413, "Maximum log size: 5 MiB")
     try:
         lines = body.decode("utf-8-sig").splitlines()
     except UnicodeDecodeError:
-        raise HTTPException(422, "Ожидается UTF-8")
+        raise HTTPException(422, "UTF-8 is expected")
     return ingest(db, source_id, lines)
 
 @app.get("/api/events", dependencies=[Depends(auth)])
@@ -247,11 +247,11 @@ def verify(id: str, db=Depends(session)):
     errors = sum(x.data["status"] >= 500 for x in http)
     if obj.detector == "server_errors":
         result = "insufficient" if len(http) < 10 else "observed_improvement" if errors / len(http) < .3 else "still_detected"
-        detail = f"После последнего действия, максимум за 5 минут: {errors}/{len(http)} ответов 5xx."
+        detail = f"After the last action, at most 5 minutes: {errors}/{len(http)} 5xx responses."
     else:
         result = "manual_review"
-        detail = f"Новых событий после действия: {len(fresh)}. Подтверждение владельца и проверка сессий/доступа требуют оператора."
-    note = f"{result}: {detail} Отсутствие повторного сигнала не доказывает устранение угрозы."
+        detail = f"New events after the action: {len(fresh)}. Owner confirmation and session/access review require an operator."
+    note = f"{result}: {detail} Absence of a repeated signal does not prove the threat is resolved."
     db.add(Action(incident_id=id, actor="rule-engine", kind="verification", note=note))
     db.commit()
     return {"result": result, "detail": note, "events": len(fresh)}

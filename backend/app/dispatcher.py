@@ -26,7 +26,7 @@ def dispatch():
                 job, status = None, None
             if status in ("failed", "stopped", "canceled") and scan.status != "pending":
                 scan.status = "failed"
-                scan.error = scan.error or "Worker не завершил задачу. Доступен повтор."
+                scan.error = scan.error or "Worker did not finish the job. Retry is available."
                 scan.updated_at = now()
             elif scan.status == "pending" or job is None:
                 if job and status in ("queued", "started", "scheduled", "deferred"):
@@ -38,7 +38,7 @@ def dispatch():
                               retry=Retry(max=2, interval=[15, 45]), result_ttl=86400, failure_ttl=604800)
                 scan.status, scan.updated_at = "queued", now()
             elif status == "finished" and scan.status != "completed":
-                scan.status, scan.error = "failed", "Задача завершилась без сохранённого результата. Повторите сканирование."
+                scan.status, scan.error = "failed", "The job finished without a saved result. Retry the scan."
         db.commit()
 
 if __name__ == "__main__":

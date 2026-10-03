@@ -66,31 +66,31 @@ def analyze(db, service_id, start, end):
         principal = (d.get("ip"), d.get("user"))
         failures = [x for x in window if x.data.get("event") == "login_failed" and (x.data.get("ip"), x.data.get("user")) == principal]
         if d.get("event") == "login_failed" and len(failures) >= 5 and any(principal):
-            record(db, service, "failed_logins", e, failures, principal, "Серия неудачных входов", "P2",
-                   [f"{len(failures)} отказов входа за 5 минут; IP: {d.get('ip', 'нет данных')}, учётная запись: {d.get('user', 'нет данных')}"],
-                   ["Возможен подбор пароля; ошибки пользователя также возможны."],
-                   ["Проверьте источник запросов и владельца учётной записи.", "При подтверждении подбора ограничьте частоту входов и включите MFA."])
+            record(db, service, "failed_logins", e, failures, principal, "Burst of failed logins", "P2",
+                   [f"{len(failures)} failed login attempts in 5 minutes; IP: {d.get('ip', 'n/a')}, account: {d.get('user', 'n/a')}"],
+                   ["Password guessing is possible; user error is also possible."],
+                   ["Check the request source and account owner.", "If password guessing is confirmed, rate-limit logins and enable MFA."])
         if d.get("event") == "login_success" and len(failures) >= 5 and any(principal):
-            record(db, service, "success_after_failures", e, failures + [e], principal, "Вход после серии отказов", "P1",
-                   [f"Успешный вход после {len(failures)} отказов за 5 минут для того же IP и пользователя."],
-                   ["Учётная запись могла быть скомпрометирована; успешный вход сам по себе этого не доказывает."],
-                   ["Свяжитесь с владельцем учётной записи и проверьте активную сессию.", "Если вход не признан, отзовите сессию и смените секреты вручную."])
+            record(db, service, "success_after_failures", e, failures + [e], principal, "Login after repeated failures", "P1",
+                   [f"Successful login after {len(failures)} failures in 5 minutes for the same IP and user."],
+                   ["The account may be compromised; a successful login alone does not prove it."],
+                   ["Contact the account owner and review the active session.", "If the login is not recognized, revoke the session and rotate secrets manually."])
         if SUSPICIOUS.search(unquote(unquote(d.get("path", "")))):
-            record(db, service, "suspicious_http", e, [e], d.get("ip"), "Подозрительный HTTP-запрос", "P2",
-                   [f"Запрос соответствует сигнатуре: {d.get('method', 'HTTP')} {d.get('path')}"],
-                   ["Возможно автоматическое сканирование; выполнение атаки не установлено."],
-                   ["Проверьте код ответа, журналы приложения и доступ к запрошенному ресурсу.", "Закройте доступ к служебным файлам и проверьте правила gateway."])
+            record(db, service, "suspicious_http", e, [e], d.get("ip"), "Suspicious HTTP request", "P2",
+                   [f"Request matches signature: {d.get('method', 'HTTP')} {d.get('path')}"],
+                   ["Automated scanning is possible; attack execution is not established."],
+                   ["Review the response code, application logs, and access to the requested resource.", "Block access to service files and review gateway rules."])
         current = [x for x in window if "status" in x.data]
         baseline = [x for x in events if t - timedelta(minutes=10) <= datetime.fromisoformat(x.timestamp) < t - timedelta(minutes=5) and "status" in x.data]
         errors = [x for x in current if x.data["status"] >= 500]
         ratio = len(errors) / len(current) if current else 0
         old = sum(x.data["status"] >= 500 for x in baseline) / len(baseline) if baseline else None
         if len(current) >= 10 and len(errors) >= 5 and ratio >= .3 and (old is None or ratio >= old + .2):
-            facts = [f"5xx: {len(errors)}/{len(current)} ({ratio:.0%}) за 5 минут."]
-            facts += [f"Предыдущие 5 минут: {old:.0%} ошибок."] if old is not None else ["Базовый период отсутствует: установлен высокий уровень, рост не доказан."]
-            record(db, service, "server_errors", e, current, "service", "Рост / высокий уровень ошибок API", "P1" if service.importance >= 4 else "P2", facts,
-                   ["Возможен сбой приложения или зависимости; связь с другими событиями по времени не доказывает причину."],
-                   ["Проверьте доступность API и базы данных, начните с health-check.", "Сопоставьте ошибки с развёртываниями; откат рассматривайте только после проверки.", "После действий проверьте новые логи и отправку тестовой заявки."])
+            facts = [f"5xx: {len(errors)}/{len(current)} ({ratio:.0%}) over 5 minutes."]
+            facts += [f"Previous 5 minutes: {old:.0%} errors."] if old is not None else ["No baseline period: a high level was detected, but growth is not proven."]
+            record(db, service, "server_errors", e, current, "service", "Rising or high API error rate", "P1" if service.importance >= 4 else "P2", facts,
+                   ["An application or dependency failure is possible; temporal correlation with other events does not prove causation."],
+                   ["Check API and database availability, starting with a health check.", "Correlate errors with deployments; consider rollback only after verification.", "After taking action, review new logs and submit a test request."])
 
 def record(db, service, detector, event, evidence, principal, title, priority, facts, hypotheses, recommendations):
     # Deduplicate overlapping detections within a 15-minute event-time episode.
@@ -99,7 +99,7 @@ def record(db, service, detector, event, evidence, principal, title, priority, f
         Incident.created_at >= (datetime.fromisoformat(event.timestamp) - timedelta(minutes=15)).isoformat(),
         Incident.created_at <= event.timestamp).order_by(Incident.created_at.desc()))
     ids = list(dict.fromkeys([x.id for x in evidence]))
-    limitations = ["Правила анализируют только полученные логи; отсутствие событий не означает отсутствие угроз.", "CVE и совпадение времени не являются доказательством взлома или причины сбоя."]
+    limitations = ["Rules analyze only received logs; absence of events does not mean absence of threats.", "CVEs and matching timestamps are not evidence of compromise or root cause."]
     if recent:
         added = set(ids) - set(recent.evidence_ids)
         recent.evidence_ids = list(dict.fromkeys(recent.evidence_ids + ids))[-200:]
@@ -111,5 +111,5 @@ def record(db, service, detector, event, evidence, principal, title, priority, f
     fp = hashlib.sha256(json.dumps(principal, sort_keys=True).encode()).hexdigest() + ":" + detector + ":" + service.id + ":" + event.id
     db.add(Incident(fingerprint=fp, service_id=service.id, detector=detector, title=title, priority=priority,
         created_at=event.timestamp, evidence_ids=ids[-200:], facts=facts, hypotheses=hypotheses,
-        limitations=limitations + ["В карточке хранится до 200 доказательств; полный поток доступен в журнале."], recommendations=recommendations))
+        limitations=limitations + ["The card stores up to 200 evidence items; the full stream is available in the event log."], recommendations=recommendations))
     db.flush()
